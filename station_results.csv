@@ -1,0 +1,32 @@
+import csv
+
+# Create an empty list to accumulate per-trace/ per-station results
+results = []
+
+# Inside your inner loop (per trace), after computing the correlation and arrival times:
+# For example, after computing:
+#   lag = np.argmax(corr) - (len(x_window) - 1)
+#   p_arrival_i = event_time + p_traveltime_i
+#
+# Also, compute station distance (in km) from epicentral distance (deg_trace):
+station_distance_km = deg_trace * 111  # approximate conversion from degrees to km
+
+# Append the current trace's information to results
+results.append({
+    "station": station_id,
+    "distance_km": f"{station_distance_km:.2f}",
+    "arrival_time": p_arrival_i.isoformat() if p_arrival_i is not None else "",
+    "correlation_shift_samples": lag
+})
+
+# (Continue with plotting and other processing...)
+
+# After processing all arrays and traces, write out the results to a CSV file:
+output_file = "station_results.csv"
+with open(output_file, "w", newline="") as f:
+    writer = csv.DictWriter(f, fieldnames=["station", "distance_km", "arrival_time", "correlation_shift_samples"])
+    writer.writeheader()
+    for rec in results:
+        writer.writerow(rec)
+
+print(f"Written station results to {output_file}")
