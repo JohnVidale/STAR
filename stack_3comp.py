@@ -1,6 +1,5 @@
 #%% make plot of the brute stack of 3 components on all arrays, aligned with P or S time
 # John Vidale 5/2025
-
 from obspy import read, Stream, UTCDateTime
 import os
 import matplotlib.pyplot as plt
