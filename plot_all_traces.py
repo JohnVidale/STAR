@@ -18,7 +18,7 @@ event_file = "Lists/List_all.csv"
 df = pd.read_csv(event_file)
 
 array_select = [1, 2, 3, 4, 5] # Select the arrays to process
-# array_select = [5] # Select the arrays to process
+# array_select = [4] # Select the arrays to process
 lat_center = [  33.609800,   33.483522,   33.327171,   33.373449,   33.473353] # use element 41 for center
 lon_center = [-116.454500, -116.151843, -116.366194, -116.62345, -116.646267]
 channel            = "*z" # "*1" for N, "*2" for E, "*Z" for Z
@@ -27,16 +27,17 @@ save_figs          = True
 be_choosy          = True # discard traces that are often bad
 offset_moveout     = True # correct for predicted slowness moveout
 static_correction  = True # apply static corrections to traces
+print_tt           = False # print travel times for each station
 
 # Define offsets (in seconds) relative to the picked phase arrival time
-start_time =  -1   # seconds relative to pick, for start of analysis window
-end_time   =   5  # seconds relative to pick, for end   of analysis window
+start_time =  -5   # seconds relative to pick, for start of analysis window
+end_time   =  20  # seconds relative to pick, for end   of analysis window
 
 min_freq   = 10 # Frequency range for bandpass filter
 max_freq   = 40
 
 # Hypocenter, the CSV has columns "id", "time" (ISO formatted), "latitude", "longitude", and "depth"
-evid = "aa0" #"ci40789071"
+evid = "ci40789567" #"ci40789071"
 evt = df[df['id'] == evid].iloc[0]
 origin_time_str = evt['time']  # e.g., "2024-11-07T08:39:06"
 event_time = UTCDateTime(origin_time_str)
@@ -82,7 +83,7 @@ for i in array_select:
     # Travel times are checked in reverse order so that the first arrival can be chosen.
     for tt in reversed(travel_times):
         slowness_sk = tt.ray_param / 111.19
-        print(f"      Phase: {tt.phase.name.upper()}, Travel Time: {tt.time:.2f} s, Slowness: {slowness_sk:.4f} s/km")
+        # print(f"      Phase: {tt.phase.name.upper()}, Travel Time: {tt.time:.2f} s, Slowness: {slowness_sk:.4f} s/km")
         if tt.phase.name.upper() == "P":
             p_traveltime = tt.time
             p_arrival_time = event_time + p_traveltime
@@ -119,11 +120,17 @@ for i in array_select:
         continue
 
     st = read(input_file)
-    print(f"    File read: {input_file}")
+    num_traces = len(st)
+    print(f"    Array {i}: {num_traces} traces in all channels,  File read: {input_file}")
+
+    # Which component, e.g. "*Z", "*1", or "*2"
+    st_comp = st.select(channel=channel)
+
+    print(f"    Array {i}: {len(st_comp)} traces in channel {channel}")
 
     # Keep only traces with data in the fixed time window
     overlapping_traces = Stream()
-    for tr in st:
+    for tr in st_comp:
         # Define station_id from the current trace as a string
         station_id = int(tr.stats.station)
 
@@ -135,37 +142,57 @@ for i in array_select:
         select = bool(data_info.iloc[0]['select'])
         if be_choosy and select == False:
             continue
-
-        # print(f"Read trace with station: {tr.stats.station}")
+        
         if tr.stats.endtime >= abs_pick and tr.stats.starttime <= abs_pick + end_time - start_time:
             overlapping_traces.append(tr)
+
+    print(f"    Array {i}: {len(overlapping_traces)} traces that are selected")
+
+    # check for NaNs
+    for ii, tr in enumerate(overlapping_traces):
+        nan_indices = np.where(np.isnan(tr.data))[0]
+        if nan_indices.size > 0:
+            print(f"Check for data, select: Station {tr.stats.station}: NaNs found at indices {nan_indices}")
+    # exit(-1)
 
     # Slice these overlapping traces to the fixed time window
     st_window = overlapping_traces.slice(starttime = abs_pick, endtime = abs_pick + end_time - start_time)
 
-    # Which component, e.g. "*Z", "*1", or "*2"
-    st_comp = st_window.select(channel=channel)
-    num_traces = len(st_comp)
-    print(f"    Array {i}: {num_traces} traces in {channel} channel")
-    if num_traces == 0:
-        print(f"No component traces in Array {i} in file {input_file}")
+    print(f"    Array {i}: {len(st_window)} traces after slicing to fixed time window")
+
+    #  Reject traces that are all zeros
+    good_st = Stream()
+    for tr in st_window:
+        station_id = int(tr.stats.station)
+        max_val = np.max(np.abs(tr.data))
+        if max_val == 0:
+            print(f"Rejecting station {station_id} that is all zeros!")
+            continue
+        good_st.append(tr)
+
+    print(f"    Array {i}: {len(good_st)} traces after eliminating all-zero traces")
+
+    if len(good_st) == 0:
+        print(f"No traces left in Array {i} after selection, skipping this array.")
         continue
 
     # Demean, taper, and filter each trace after slicing the window
-    for tr in st_comp:
+    for tr in good_st:
+        station_id = int(tr.stats.station)
         tr.detrend(type="demean")
         tr.taper(max_percentage=0.05, type="cosine")
         tr.filter('bandpass', freqmin=min_freq, freqmax=max_freq, corners=4, zerophase=False)
         tr.data = tr.data / np.max(np.abs(tr.data))
-    
+
     # Get parameters of data from first trace
-    sample_rate = st_comp[0].stats.sampling_rate
-    npts = min(tr.stats.npts for tr in st_comp)
-    t_axis = st_comp[0].times()[:npts]
+    sample_rate = good_st[0].stats.sampling_rate
+    npts = min(tr.stats.npts for tr in good_st)  # Find the minimum number of points across all traces
+    t_axis = good_st[0].times()[:npts]
 
     # --- Define subplot layout for individual traces ---
     chunk_size = 10
-    num_groups = math.ceil(num_traces / chunk_size)
+    num_groups = math.ceil(len(good_st) / chunk_size)
+    print(f"    Number of groups for subplots: {num_groups} from {len(good_st)} traces with chunk size {chunk_size}")
     total_subplots = num_groups
 
     n_cols = 4
@@ -178,9 +205,9 @@ for i in array_select:
     # Define the pick reference so that zero corresponds to the pick
     pick_ref = p_traveltime
 
-    for j, chunk_start in enumerate(range(0, num_traces, chunk_size)): # make each subplot
+    for j, chunk_start in enumerate(range(0, len(good_st), chunk_size)): # make each subplot
         ax = axes[j]
-        chunk = st_comp[chunk_start:chunk_start + chunk_size]
+        chunk = good_st[chunk_start:chunk_start + chunk_size]
         extra_offset = 0
 
         # --- Plotting the individual station traces ---
@@ -202,7 +229,8 @@ for i in array_select:
             station_lon = float(station_meta['longitude'])
 
             station_deg = locations2degrees(event_lat, event_lon, station_lat, station_lon)
-            print(f"    Epicentral distance: {station_deg*111:.2f} km")
+            if print_tt:
+                print(f"    Epicentral distance: {station_deg*111:.2f} km")
 
             travel_times = model.get_travel_times(source_depth_in_km=event_depth,
                                                 distance_in_degree=station_deg,
@@ -212,7 +240,8 @@ for i in array_select:
             # Travel times are checked in reverse order so that the first arrival can be chosen.
             for tt in reversed(travel_times):
                 # slowness_sk = tt.ray_param / 111.19
-                print(f"      Phase: {tt.phase.name.upper()}, Travel Time: {tt.time:.2f} s, Slowness: {slowness_sk:.4f} s/km")
+                if print_tt:
+                    print(f"      Phase: {tt.phase.name.upper()}, Travel Time: {tt.time:.2f} s, Slowness: {slowness_sk:.4f} s/km")
                 if tt.phase.name.upper() == "P":
                     p_diff = p_traveltime - tt.time #array center time minus time for this station
                 if tt.phase.name.upper() == "S":
@@ -220,10 +249,12 @@ for i in array_select:
 
             if   align_phase == "P":
                 shift = p_diff
-                print(f"    P-wave diff: {p_diff:.4f} s, p_traveltime: {p_traveltime:.4f}, tt.time: {tt.time:.4f} s")
+                if print_tt:
+                    print(f"    P-wave diff: {p_diff:.4f} s, p_traveltime: {p_traveltime:.4f}, tt.time: {tt.time:.4f} s")
             elif align_phase == "S":
                 shift = s_diff
-                print(f"    S-wave diff: {s_diff:.4f} s, s_traveltime: {s_traveltime:.4f}, tt.time: {tt.time:.4f} s")
+                if print_tt:
+                    print(f"    S-wave diff: {s_diff:.4f} s, s_traveltime: {s_traveltime:.4f}, tt.time: {tt.time:.4f} s")
 
             cut_data = data[0:int(sample_rate * (end_time - start_time))]
 
@@ -232,7 +263,8 @@ for i in array_select:
             
             station_label = station_id[-2:]
             
-            print(f"    Plotting {station_label} with station_deg {station_deg*111.19:.4f} and shift {shift:.4f}")
+            if print_tt:
+                print(f"    Plotting {station_label} with station_deg {station_deg*111.19:.4f} and shift {shift:.4f}")
 
             # Define station_id from the current trace as a string
             station_id = int(tr.stats.station)
@@ -248,7 +280,8 @@ for i in array_select:
                 elif align_phase == "S":
                     static_corr = int(data_info.iloc[0]['s_static'])/100
                 shift = shift + static_corr
-                print(f"    Static correction for {station_label}: {static_corr} s")
+                if print_tt:
+                    print(f"    Static correction for {station_label}: {static_corr} s")
 
             # --- Plotting each individual trace: subtract the chosen alignment time ---
             if offset_moveout:

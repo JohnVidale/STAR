@@ -16,7 +16,7 @@ os.chdir('/Users/vidale/Documents/Research/STAR')
 # Read the event list CSV and select event "ci40789071"
 event_file = "Lists/List_all.csv"
 df = pd.read_csv(event_file)
-plot_all_traces = True
+plot_all_traces = False
 
 channel     = "*2" # "*1" for N, "*2" for E, "*Z" for Z
 array_select = [5]
@@ -31,7 +31,7 @@ min_freq   = 10 # Frequency range for bandpass filter
 max_freq   = 40
 
 # Hypocenter, the CSV has columns "id", "time" (ISO formatted), "latitude", "longitude", and "depth"
-evid = "ci40988320" #"ci40789071"
+evid = "ci40789567" #"ci40789071"
 evt = df[df['id'] == evid].iloc[0]
 origin_time_str = evt['time']  # e.g., "2024-11-07T08:39:06"
 event_time = UTCDateTime(origin_time_str)

@@ -18,37 +18,35 @@ df = pd.read_csv(event_file)
 
 # does all 3 channels
 array_select = [1, 2, 3, 4, 5] # Select the arrays to process
-# array_select = [4]
+# array_select = [2]
 comp_list = ["*Z", "*1", "*2"]
-# comp_list = ["*Z"]
 lat_center = [  33.609800,   33.483522,   33.327171,   33.373449,   33.473353] # use element 41 for center
 lon_center = [-116.454500, -116.151843, -116.366194, -116.62345, -116.646267]
 align_phase        = "P" # "P" for P-wave, "S" for S-wave alignment
 save_figs          = True
 be_choosy          = True   # discard traces that are often bad
-moveout_correction = True   # correct for predicted slowness moveout
+moveout_correction = False   # correct for predicted slowness moveout
 static_correction  = True   # apply static corrections to traces
 
 # Define offsets (in seconds) relative to the picked phase arrival time
-start_time =  -2  # seconds relative to pick, for start of analysis window
-end_time   =  10   # seconds relative to pick, for end   of analysis window
+start_time = -4  # seconds relative to pick, for start of analysis window
+end_time   = 20   # seconds relative to pick, for end   of analysis window
 
-min_freq   =  5 # Frequency range for bandpass filter
-max_freq   = 40
+min_freq   = 0.5 # Frequency range for bandpass filter
+max_freq   = 2
 
 vertical_offset = 1.2  # For visual separation among components
-plot_mag        = 1.5 # Vertical amplification factor for plot
+plot_mag        = 2.0 # Vertical amplification factor for plot
 
 # Hypocenter, the CSV has columns "id", "time", "latitude", "longitude", and "depth"
-evid = "ci40789567" # "ci40789071"
+evid = "ci40183482" # "ci40789071"
 evt = df[df['id'] == evid].iloc[0]
 origin_time_str = evt['time']  # e.g., "2024-11-07T08:39:06"
 event_time  = UTCDateTime(origin_time_str)
 event_lat   = float(evt['latitude'])
 event_lon   = float(evt['longitude'])
 event_depth = float(evt['depth'])  # Event depth in km
-event_mag   = float(evt['mag'])  # Event magnitude
-print(f"Event {evid} with origin time {event_time} lat={event_lat}, lon={event_lon}, depth={event_depth} km, mag={event_mag}")
+print(f"Event {evid} with origin time {event_time} lat={event_lat}, lon={event_lon}, depth={event_depth} km")
 
 # Load the TauPyModel for travel time calculations
 # model = TauPyModel(model="iasp91")
@@ -83,17 +81,16 @@ for idx, i in enumerate(array_select):
     print(f"Processing Array {i}")
     # ----------------------------
     center_deg = locations2degrees(event_lat, event_lon, lat_center[i-1], lon_center[i-1])
-    center_km = center_deg * 111.19  # Convert degrees to kilometers
-    print(f"    Epicentral distance: {center_km:.2f} km")
+    print(f"    Epicentral distance: {center_deg*111:.2f} km")
 
     # Compute travel times using the first station.
     travel_times = model.get_travel_times(source_depth_in_km=event_depth,
                                           distance_in_degree=center_deg,
-                                          phase_list=["p", "P", "s", "S", "PvmP", "SvmS", "SvmP", "PvmS"])
+                                          phase_list=["p", "P", "s", "S", "PvmP", "SvmS", "PcP", "ScS"])
     print("    Central station travel times and slowness:")
     for tt in reversed(travel_times):
         slowness_sk = tt.ray_param / 111.19
-        # print(f"      Phase: {tt.phase.name.upper()}, Travel Time: {tt.time:.2f} s, Slowness: {slowness_sk:.4f} s/km")
+        print(f"      Phase: {tt.phase.name.upper()}, Travel Time: {tt.time:.2f} s, Slowness: {slowness_sk:.4f} s/km")
         if tt.phase.name.upper() == "P":
             p_traveltime = tt.time
             p_arrival_time = event_time + p_traveltime
@@ -106,12 +103,12 @@ for idx, i in enumerate(array_select):
         if tt.phase.name.upper() == "SVMS":
             sms_traveltime = tt.time
             sms_arrival_time = event_time + sms_traveltime
-        if tt.phase.name.upper() == "SVMP":
-            smp_traveltime = tt.time
-            smp_arrival_time = event_time + smp_traveltime
-        if tt.phase.name.upper() == "PVMS":
-            pms_traveltime = tt.time
-            pms_arrival_time = event_time + pms_traveltime
+        if tt.phase.name.upper() == "PCP":
+            pcp_traveltime = tt.time
+            pcp_arrival_time = event_time + pcp_traveltime
+        if tt.phase.name.upper() == "SCS":
+            scs_traveltime = tt.time
+            scs_arrival_time = event_time + scs_traveltime
 
     # Define the fixed window relative to the chosen arrival.
     if align_phase == "P":
@@ -121,8 +118,6 @@ for idx, i in enumerate(array_select):
         p_time_rel = 0
         pmp_time_rel = pmp_traveltime - p_traveltime
         sms_time_rel = sms_traveltime - p_traveltime
-        smp_time_rel = smp_traveltime - p_traveltime
-        pms_time_rel = pms_traveltime - p_traveltime
     elif align_phase == "S":
         abs_pick   = s_arrival_time + start_time
         rel_pick   = s_arrival_time
@@ -130,8 +125,16 @@ for idx, i in enumerate(array_select):
         p_time_rel = p_traveltime - s_traveltime
         pmp_time_rel = pmp_traveltime - s_traveltime
         sms_time_rel = sms_traveltime - s_traveltime
-        smp_time_rel = smp_traveltime - s_traveltime
-        pms_time_rel = pms_traveltime - s_traveltime
+    # elif align_phase == "PMP":
+    #     abs_pick   = pmp_arrival_time + start_time
+    #     rel_pick   = pmp_arrival_time
+    #     s_time_rel = 0
+    #     p_time_rel = p_traveltime - pmp_traveltime
+    # elif align_phase == "SMS":
+    #     abs_pick   = sms_arrival_time + start_time
+    #     rel_pick   = sms_arrival_time
+    #     s_time_rel = 0
+    #     p_time_rel = p_traveltime - sms_traveltime
     else:
         print(f"Did not find chosen arrival")
         continue
@@ -168,40 +171,15 @@ for idx, i in enumerate(array_select):
         
         if tr.stats.endtime >= abs_pick and tr.stats.starttime <= abs_pick + (end_time - start_time):
             hour_traces.append(tr)
+        # print(f"hour_traces len is {len(hour_traces)}")
 
-    # Count the number of traces in the hour stream.
-    hour_tr_cnt = len(hour_traces)
-    print(f"{hour_tr_cnt} hour traces read in")
-    if hour_tr_cnt == 0:
+
+    if len(hour_traces) == 0:
         print(f"No data for time window in file: {input_file}")
         continue
 
     # Slice the hour traces to the fixed time window.
     st_window = hour_traces.slice(starttime=abs_pick, endtime=abs_pick + end_time - start_time)
-    cut_tr_cnt = len(st_window)
-    print(f"cut traces len is {cut_tr_cnt}")
-        
-    # Process each trace: detrend, taper, filter.
-    for tr in st_window:
-        tr.detrend(type="demean")
-        tr.taper(max_percentage=0.01, type="cosine")
-        tr.filter('bandpass', freqmin=min_freq, freqmax=max_freq, corners=4, zerophase=False)
-
-    # Normalize each trace by the maximum amplitude of the three components.
-    if cut_tr_cnt % 3 != 0:
-        print(f"Warning: Number of traces ({cut_tr_cnt}) is not a multiple of 3, something is wrong.")
-        exit(-1)
-    for ii in range(0, cut_tr_cnt, 3):
-        trace_maxZ = np.max(np.abs(st_window[ii].data))
-        trace_max1 = np.max(np.abs(st_window[ii + 1].data))
-        trace_max2 = np.max(np.abs(st_window[ii + 2].data))
-        trace_max = max(trace_maxZ, trace_max1, trace_max2)
-        if trace_max == 0:
-            print(f"Station {st_window[ii].stats.station} has zero amplitude, skipping normalization.")
-            continue
-        st_window[ii].data /= trace_max
-        st_window[ii + 1].data /= trace_max
-        st_window[ii + 2].data /= trace_max
 
     # Dictionaries to store final (averaged) stacks and vertical offsets.
     comp_stacks = {}
@@ -211,11 +189,15 @@ for idx, i in enumerate(array_select):
     for comp in comp_list:
         st_comp = st_window.select(channel=comp)
         num_traces = len(st_comp)
-        if comp == "*Z":
-            print(f"Component {comp}: {num_traces} traces processed.")
         if num_traces == 0:
             print(f"No traces found for component {comp} in Array {i}")
             continue
+
+        # Process each trace: detrend, taper, filter.
+        for tr in st_comp:
+            tr.detrend(type="demean")
+            tr.taper(max_percentage=0.01, type="cosine")
+            tr.filter('bandpass', freqmin=min_freq, freqmax=max_freq, corners=4, zerophase=False)
 
         sample_rate = st_comp[0].stats.sampling_rate
         nstack = int(sample_rate * (end_time - start_time))
@@ -293,8 +275,7 @@ for idx, i in enumerate(array_select):
 
         if count > 0:
             stack_shifted /= count  # Average the stack (without normalization yet)
-            if comp == "*Z":
-                print(f"Component {comp}: {count} traces stacked.")
+            print(f"Component {comp}: {count} traces stacked.")
             # Store the stack for later global normalization.
             comp_stacks[comp] = stack_shifted
 
@@ -335,10 +316,6 @@ for idx, i in enumerate(array_select):
             ax.axvline(x=pmp_time_rel, color="green", linestyle="--", lw=1, label="PmP predicted")
         if sms_time_rel < end_time:
             ax.axvline(x=sms_time_rel, color="orange", linestyle="--", lw=1, label="SmS predicted")
-        if smp_time_rel < end_time:
-            ax.axvline(x=smp_time_rel, color="red", linestyle="--", lw=1, label="SmP predicted")
-        if pms_time_rel < end_time:
-            ax.axvline(x=pms_time_rel, color="blue", linestyle="--", lw=1, label="PmS predicted")
     elif align_phase == "S":
         if 0 > start_time and 0 < end_time:
             ax.axvline(x=0, color="cyan", linestyle="--", lw=1, label="S predicted")
@@ -348,10 +325,6 @@ for idx, i in enumerate(array_select):
             ax.axvline(x=pmp_time_rel, color="green", linestyle="--", lw=1, label="PmP predicted")
         if sms_time_rel < end_time and sms_time_rel > start_time:
             ax.axvline(x=sms_time_rel, color="orange", linestyle="--", lw=1, label="SmS predicted")
-        if smp_time_rel < end_time and smp_time_rel > start_time:
-            ax.axvline(x=smp_time_rel, color="green", linestyle="--", lw=1, label="SmP predicted")
-        if pms_time_rel < end_time and pms_time_rel > start_time:
-            ax.axvline(x=pms_time_rel, color="blue", linestyle="--", lw=1, label="PmS predicted")
 
     # Set fixed vertical axis limits.
     ax.set_ylim(-1.5, 3.9)
@@ -363,10 +336,6 @@ for idx, i in enumerate(array_select):
     else:
         ax.set_title(f"Array {i}")
     ax.legend(loc="upper right", fontsize="small")
-
-    ax.text(0.02, 0.98, f"dist = {center_km:.2f} km",
-        transform=ax.transAxes, fontsize=10,
-        verticalalignment='top', horizontalalignment='left')
 
 fig.tight_layout()
 save_path = os.path.join(save_dir, f"E{origin_time_str}.png")
